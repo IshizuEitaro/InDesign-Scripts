@@ -1,143 +1,123 @@
-function convertLinksToFootnotes() {
+// Creates footnotes while preserving original markers and avoiding the definition page.
 
+function createFootnotesFromText() {
     if (app.documents.length === 0) {
         alert("Error: No document is open. Please open a document and try again.");
         return;
     }
     var doc = app.activeDocument;
 
-    var linkClassName = prompt("Enter the class name for the footnote links:", "notes", "Footnote Link Class");
-    if (!linkClassName) {
+    // --- USER INPUT ---
+    var openMarker = prompt("Enter the OPENING symbol(s) for the marker (e.g., '(' or '＊').\nLeave empty if none.", "(");
+    if (openMarker === null) return;
+
+    var closeMarker = prompt("Enter the CLOSING symbol(s) for the marker (e.g., ')').\nLeave empty if none.", ")");
+    if (closeMarker === null) return;
+
+    // --- NEW PROMPT FOR DEFINITION PAGE ---
+    var defStartPage = prompt("To avoid errors, enter the page number where your DEFINITION list begins:", "10");
+    if (defStartPage === null || isNaN(parseInt(defStartPage))) {
+        alert("Invalid page number. Aborting script.");
         return;
     }
+    var defStartPageNum = parseInt(defStartPage, 10);
 
-    var stylesToEnsure = ["footnote", "footnote-number"];
-    for (var i = 0; i < stylesToEnsure.length; i++) {
-        if (!doc.characterStyles.itemByName(stylesToEnsure[i]).isValid) {
-            doc.characterStyles.add({ name: stylesToEnsure[i] });
-            alert("Notice: Character style '" + stylesToEnsure[i] + "' was created.");
-        }
+    // --- SETUP ---
+    function escapeForGrep(str) {
+        if (!str) return "";
+        return str.replace(/([\\()\[\]{}.*+?^$|])/g, "\\$1");
     }
-    var footnoteCharStyle = doc.characterStyles.itemByName("footnote");
-    var footnoteNumberStyle = doc.characterStyles.itemByName("footnote-number");
 
-    var tasks = [];
+    var escapedOpenMarker = escapeForGrep(openMarker);
+    var escapedCloseMarker = escapeForGrep(closeMarker);
+    
     app.findGrepPreferences = NothingEnum.NOTHING;
     app.changeGrepPreferences = NothingEnum.NOTHING;
 
-    app.findGrepPreferences.findWhat = '<a\\s+[^>]*?class\\s*=\\s*["“”]' + linkClassName + '["“”][^>]*?>.*?<\\/a>';
-    var foundLinks = doc.findGrep();
+    // --- STEP 1: GATHER ALL DEFINITIONS ---
+    var definitions = {};
+    var paragraphsToDelete = [];
 
-    if (foundLinks.length === 0) {
-        alert("Operation stopped: No links found with class '" + linkClassName + "'.");
+    // This GREP finds the number and the text separately.
+    app.findGrepPreferences.findWhat = "^" + escapedOpenMarker + "(\\d+)" + escapedCloseMarker + "(\\s+.+)";
+    var foundDefinitions = doc.findGrep();
+
+    if (foundDefinitions.length === 0) {
+        alert("Operation stopped: No definition paragraphs found matching the pattern '" + openMarker + "[number]" + closeMarker + "'.");
         return;
     }
 
-    alert("Found " + foundLinks.length + " links. Matching them to their footnote content...");
-
-    for (var j = 0; j < foundLinks.length; j++) {
-        var aLink = foundLinks[j];
-        if (!aLink.isValid) continue;
-
-        var linkHTML = aLink.contents;
-        var hrefMatch = linkHTML.match(/href\s*=\s*["“”][^#]+#(.*?)["“”]/);
-
-        if (hrefMatch && hrefMatch[1]) {
-            var footnoteContentID = hrefMatch[1];
-
-            app.findGrepPreferences = NothingEnum.NOTHING;
-            app.findGrepPreferences.findWhat = '<p\\b[^>]*>.*?<a\\s+[^>]*?id\\s*=\\s*["“”]' + footnoteContentID + '["“”][^>]*?>(.*?)<\\/a>(.*?)<\\/p>';
-            var foundContent = doc.findGrep();
-
-            if (foundContent.length > 0) {
-                tasks.push({
-                    linkObject: aLink,
-                    contentParagraph: foundContent[0].paragraphs[0]
-                });
-            } else {
-                alert("Warning: Could not find content for ID: #" + footnoteContentID + ". Skipping.");
-            }
+    alert("Found " + foundDefinitions.length + " definitions. Storing them now.");
+    for (var i = 0; i < foundDefinitions.length; i++) {
+        var aDef = foundDefinitions[i];
+        if (aDef.contents.toString().match(app.findGrepPreferences.findWhat)) {
+            var number = RegExp.$1;
+            var text = RegExp.$2;
+            // --- NEW: Store the ENTIRE definition line, including the marker ---
+            definitions[number] = openMarker + number + closeMarker + text;
+            paragraphsToDelete.push(aDef.paragraphs[0]);
         }
     }
 
-    if (tasks.length === 0) {
-        alert("No valid link-and-content pairs found.");
-        return;
-    }
-
-    alert(tasks.length + " valid task(s) created. Starting conversion...");
+    // --- STEP 2: FIND MARKERS IN MAIN TEXT AND CREATE FOOTNOTES ---
     var processedCount = 0;
-    var paragraphsToDelete = []; 
+    
+    var keysArray = [];
+    for (var key in definitions) {
+        if (definitions.hasOwnProperty(key)) { keysArray.push(key); }
+    }
+    var sortedKeys = keysArray.sort(function(a, b) { return parseInt(b, 10) - parseInt(a, 10); });
 
-    for (var k = tasks.length - 1; k >= 0; k--) {
-        var currentTask = tasks[k];
-        var linkToProcess = currentTask.linkObject;
-        var paraToProcess = currentTask.contentParagraph;
-
-        if (!linkToProcess.isValid || !paraToProcess.isValid) {
-            continue;
-        }
-        
-        var rawFootnoteHtml = paraToProcess.contents;
-        paragraphsToDelete.push(paraToProcess.contents);
-
-        var fullLinkHtml = linkToProcess.contents;
-        var innerHtml = fullLinkHtml.replace(/^<a\s+[^>]*?>/i, "").replace(/<\/a>$/i, "");
-        linkToProcess.contents = innerHtml;
+    alert("Starting to convert " + sortedKeys.length + " markers found before page " + defStartPageNum + "...");
+    for (var i = 0; i < sortedKeys.length; i++) {
+        var number = sortedKeys[i];
+        var definitionText = definitions[number];
 
         app.findGrepPreferences = NothingEnum.NOTHING;
-        
-        app.findGrepPreferences.findWhat = "[^一-龯ぁ-んァ-ン\\w]";
-        var symbolResult = linkToProcess.findGrep();
-        if (symbolResult.length > 0) {
-            for (var s = 0; s < symbolResult.length; s++) {
-                symbolResult[s].appliedCharacterStyle = footnoteCharStyle;
+        app.findGrepPreferences.findWhat = escapedOpenMarker + number + escapedCloseMarker;
+        var foundMarkers = doc.findGrep();
+
+        for (var j = foundMarkers.length - 1; j >= 0; j--) {
+            var aMarker = foundMarkers[j];
+            if (!aMarker.isValid) continue;
+
+            // --- NEW: CHECK THE PAGE NUMBER OF THE MARKER ---
+            try {
+                // Find the page the marker is on.
+                var markerPage = aMarker.parentTextFrames[0].parentPage;
+                if (markerPage === null || parseInt(markerPage.name) >= defStartPageNum) {
+                    // If it's on or after the definition page, skip it.
+                    continue;
+                }
+            } catch (e) {
+                // Could fail if marker is in overset text. Skip it.
+                continue;
             }
-        }
-
-        app.findGrepPreferences.findWhat = "(\\d+)";
-        var numberResult = linkToProcess.findGrep();
-
-        if (numberResult.length > 0) {
-            var numberObject = numberResult[0];
-            numberObject.appliedCharacterStyle = footnoteNumberStyle;
-
-            var insertionPoint = numberObject.insertionPoints[-1];
-            var newFootnote = insertionPoint.footnotes.add();
-            newFootnote.texts[0].contents = rawFootnoteHtml;
-        } else {
-            var fallbackFootnote = linkToProcess.insertionPoints[-1].footnotes.add();
-            fallbackFootnote.texts[0].contents = rawFootnoteHtml;
-        }
-
-        processedCount++;
-    }
-
-    for (var m = paragraphsToDelete.length - 1; m >= 0; m--) {
-        var paraContents = paragraphsToDelete[m];
-        var foundParas = doc.stories.everyItem().paragraphs.everyItem().getElements();
-        var foundPara = null;
-        for (var n = 0; n < foundParas.length; n++) {
-            if (foundParas[n].contents === paraContents) {
-                foundPara = foundParas[n];
-                break;
-            }
-        }
-        if (foundPara && foundPara.isValid) {
-            foundPara.remove();
-        } else {
-            alert("Paragraph was not valid or not found at deletion time:\n" + paraContents);
+            
+            // --- MODIFIED: Insert footnote, but DO NOT remove the original marker ---
+            var newFootnote = aMarker.insertionPoints[0].footnotes.add();
+            newFootnote.texts[0].contents = definitionText;
+            
+            processedCount++;
         }
     }
 
+    // --- STEP 3: CLEAN UP DEFINITION PARAGRAPHS ---
+    for (var i = paragraphsToDelete.length - 1; i >= 0; i--) {
+        if (paragraphsToDelete[i].isValid) {
+            paragraphsToDelete[i].remove();
+        }
+    }
+    
+    // --- FINALIZATION ---
     app.findGrepPreferences = NothingEnum.NOTHING;
     app.changeGrepPreferences = NothingEnum.NOTHING;
-
     alert("Conversion complete!\n" + processedCount + " footnote(s) were successfully created.");
 }
 
+// --- RUN THE SCRIPT ---
 try {
-    convertLinksToFootnotes();
+    createFootnotesFromText();
 } catch (e) {
     alert("An unexpected error occurred:\n" + e.name + ': ' + e.message + "\nLine: " + e.line);
 }
