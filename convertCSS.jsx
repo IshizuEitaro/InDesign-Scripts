@@ -14,13 +14,11 @@ function convertSpanToCharacterStyle() {
         return;
     }
     var doc = app.activeDocument;
-    var missingStyles = [];
+    var missingStyles = []; 
 
-    // This GREP pattern looks for: <span class="any-class-name">any text content</span>
-    // It uses capturing groups to extract the class name (group 1) and the text content (group 2).
     var grepPattern = '<span\\s+class=["”]([^"”]+)["”]>([\\s\\S]+?)<\\/span>';
 
-    app.findGrepPreferences = null;
+    app.findGrepPreferences = null; 
     app.findGrepPreferences.findWhat = grepPattern;
 
     var finds = doc.findGrep();
