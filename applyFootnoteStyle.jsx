@@ -1,5 +1,4 @@
 function applyFootnoteStyles() {
-
     if (app.documents.length === 0) {
         alert("Error: Please open an InDesign document before running this script.");
         return;

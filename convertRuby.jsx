@@ -1,12 +1,11 @@
 var doc = app.activeDocument;
 var allStories = doc.stories;
+var rubyFoundInDocument = false;
 
 if (allStories.length === 0) {
     alert("No stories found in the document.");
     exit();
 }
-
-var rubyFoundInDocument = false;
 
 for (var s = 0; s < allStories.length; s++) {
     var storyToProcess = allStories[s];
